@@ -95,8 +95,14 @@
 <script type="module">
 /* ══════════════════════════════════════════════════════════════
    고칠 곳은 이 한 줄입니다. 같은 폴더에 둔 파일 이름을 씁니다.
+
+   기본을 100만 개짜리로 둔 이유. 갤럭시에서 재 보니 알갱이 297만 개는
+   12 fps 로 끊기고 100만 개는 37 fps 로 부드러웠습니다. 파일 크기는
+   기다리는 시간을 정하고 알갱이 개수는 부드러움을 정하는데, 링크를 받은
+   사람이 먼저 만나는 것은 부드러움 쪽이라 그것을 기본값으로 삼았습니다.
+   전체 297만 개는 화면 아래 버튼으로 한 번에 바꿔 볼 수 있습니다.
    ══════════════════════════════════════════════════════════════ */
-const SPLAT_FILE = "scene.sog";
+const SPLAT_FILE = "scene_1000000.sog";
 /* ══════════════════════════════════════════════════════════════ */
 
 // 확장자를 Spark 안쪽 이름으로 옮기는 대응표.
@@ -224,11 +230,17 @@ async function load(name, bytesOrNull) {
     const ext = name.split(".").pop().toLowerCase();
     const fileType = FILE_TYPE[ext];
     if (!fileType) throw new Error(`대응표에 없는 확장자입니다: .${ext}`);
-    mesh = new SPARK.SplatMesh({ fileBytes: new Uint8Array(buf), fileType });
-    scene.add(mesh);
-    await mesh.initialized;
-    const n = mesh.packedSplats?.numSplats ?? 0;
-    if (!n) throw new Error("알갱이가 0개입니다 — 파일을 못 읽었습니다");
+    // mesh 에 바로 넣지 않는다. SplatMesh 는 만들어진 직후에는 아직 안 올라간
+    // 상태인데, 그리기 고리가 mesh 만 보고 "화면이 떴다"로 세면 실제보다
+    // 이른 시각이 찍힌다. 준비가 끝난 뒤에 넣는다.
+    const m = new SPARK.SplatMesh({ fileBytes: new Uint8Array(buf), fileType });
+    scene.add(m);
+    try {
+      await m.initialized;
+    } catch (e) { scene.remove(m); throw e; }
+    const n = m.packedSplats?.numSplats ?? 0;
+    if (!n) { scene.remove(m); throw new Error("알갱이가 0개입니다 — 파일을 못 읽었습니다"); }
+    mesh = m;
     step("s4", "ok", `알갱이로 풀기 (${fileType})`);
     $("v-n").textContent = n.toLocaleString("ko-KR");
     // 파일 크기를 알갱이 개수로 나눈 값. 68이면 각도별 색이 비어 있는 것이다.
