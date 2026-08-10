@@ -1,0 +1,7 @@
+# 중간 산출물은 올리지 않는다. .ply 는 100MiB 한계를 넘는다.
+*.ply
+*.spz
+*.npz
+*.npy
+frames/
+*.mp4

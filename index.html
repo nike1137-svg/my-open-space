@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>놀이터를 알갱이로</title>
+<style>
+  html,body{margin:0;height:100%;background:#0a0d12;color:#dde5ef;overflow:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif}
+  #view{display:block;width:100%;height:100%;touch-action:none}
+  .card{position:fixed;background:rgba(10,13,18,.88);border:1px solid #223047;
+    border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.6;
+    backdrop-filter:blur(8px)}
+  #left{left:12px;top:12px;max-width:min(330px,calc(100vw - 24px))}
+  #left h1{margin:0 0 7px;font-size:13.5px;color:#67d4f5;font-weight:600;letter-spacing:.2px}
+  ol#steps{margin:0;padding:0;list-style:none;counter-reset:s}
+  ol#steps li{padding:1.5px 0 1.5px 22px;color:#5b6b80;position:relative}
+  ol#steps li::before{position:absolute;left:0;width:16px;text-align:center;content:"·"}
+  ol#steps li.run::before{content:"◌";color:#e0b429}
+  ol#steps li.ok{color:#8fe3ab} ol#steps li.ok::before{content:"✓";color:#25c05f;font-weight:700}
+  ol#steps li.bad{color:#f5a2a2} ol#steps li.bad::before{content:"✕";color:#e8433f;font-weight:700}
+  #why{margin-top:9px;padding:9px 10px;border-radius:7px;background:#2b1114;
+    border:1px solid #7c1d1c;color:#fbcaca;display:none;white-space:pre-wrap;font-size:12px}
+  #why.on{display:block} #why b{color:#f5a2a2}
+  #stats{right:12px;top:12px;min-width:186px}
+  #stats table{border-collapse:collapse;width:100%}
+  #stats th{text-align:left;font-weight:400;color:#5b6b80;padding:1px 10px 1px 0;white-space:nowrap}
+  #stats td{text-align:right;color:#dde5ef;font-variant-numeric:tabular-nums;white-space:nowrap}
+  #stats td.hl{color:#e0b429;font-weight:600}
+  #bar{right:12px;bottom:12px;text-align:right}
+  button{background:#1b2536;color:#dde5ef;border:1px solid #2f405a;border-radius:7px;
+    padding:6px 10px;font-size:12px;cursor:pointer;margin:2px 0 2px 4px}
+  button:hover{background:#293850}
+  #drop{position:fixed;inset:0;display:none;place-items:center;
+    background:rgba(4,20,34,.82);border:3px dashed #38bdf8;z-index:9;
+    font-size:17px;color:#9fe4ff}
+  #drop.on{display:grid}
+  .hint{color:#5b6b80;font-size:11.5px;margin-top:8px}
+  code{background:#1b2536;padding:1px 5px;border-radius:4px;color:#e0b429;font-size:11.5px}
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="drop">파일을 놓으면 그것으로 다시 그립니다</div>
+
+<div class="card" id="left">
+  <h1>놀이터를 알갱이로</h1>
+  <ol id="steps">
+    <li id="s1">three.js 와 Spark 불러오기</li>
+    <li id="s2">SparkRenderer 를 장면에 넣기</li>
+    <li id="s3">파일 받기</li>
+    <li id="s4">알갱이로 풀기</li>
+    <li id="s5">크기를 재서 카메라 놓기</li>
+  </ol>
+  <div id="why"></div>
+  <div class="hint">파일을 창에 끌어다 놓으면 그 파일로 다시 그립니다.
+    <code>.ply</code> <code>.compressed.ply</code> <code>.sog</code> <code>.spz</code></div>
+</div>
+
+<div class="card" id="stats">
+  <table>
+    <tr><th>파일</th><td id="v-name">—</td></tr>
+    <tr><th>크기</th><td id="v-size">—</td></tr>
+    <tr><th>받는 데</th><td id="v-time">—</td></tr>
+    <tr><th>알갱이</th><td id="v-n">—</td></tr>
+    <tr><th>알갱이당</th><td class="hl" id="v-per">—</td></tr>
+    <tr><th>초당 프레임</th><td id="v-fps">—</td></tr>
+  </table>
+</div>
+
+<div class="card" id="bar">
+  <button id="b-fit">화면에 맞추기</button><button id="b-flip">위아래 뒤집기</button><br>
+  <button id="b-spin">자동 회전</button><button id="b-why">막혔을 때</button>
+</div>
+
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/",
+  "@sparkjsdev/spark":"https://cdn.jsdelivr.net/npm/@sparkjsdev/spark@2.1.0/dist/spark.module.js"
+}}
+</script>
+<script type="module">
+/* ══════════════════════════════════════════════════════════════
+   고칠 곳은 이 한 줄입니다. 같은 폴더에 둔 파일 이름을 씁니다.
+   ══════════════════════════════════════════════════════════════ */
+const SPLAT_FILE = "scene.sog";
+/* ══════════════════════════════════════════════════════════════ */
+
+// 확장자를 Spark 안쪽 이름으로 옮기는 대응표.
+// .sog 는 "sog" 가 아니라 "pcsogszip" 이다. 그대로 넘기면 Invalid file type.
+// .compressed.ply 는 마지막 조각이 "ply" 라 이 표에 그대로 걸린다.
+const FILE_TYPE = {
+  ply:    "ply",          // 무압축과 압축된 .ply 둘 다 읽힌다
+  sog:    "pcsogszip",    // <- 확장자와 이름이 다른 유일한 자리
+  spz:    "spz",          // 주의: splat-transform 3.2.0 이 쓰는 SPZ 는 버전 4 인데
+                          // Spark 2.1.0 은 "Unsupported SPZ version: 4" 로 거부한다.
+                          // 다른 도구가 만든 낮은 판이면 이 줄로 읽힌다.
+  splat:  "splat",
+  ksplat: "ksplat",
+};
+
+const $ = id => document.getElementById(id);
+const step = (id, cls, text) => { $(id).className = cls || ""; if (text) $(id).textContent = text; };
+
+function blocked(msg) {
+  $("why").classList.add("on");
+  $("why").innerHTML = "<b>막혔습니다</b>\n" + msg;
+}
+addEventListener("error", e => blocked("자바스크립트 오류: " + (e?.message ?? e)));
+addEventListener("unhandledrejection", e => blocked("처리 못 한 실패: " + (e.reason?.message ?? e.reason)));
+
+// ── 1. 라이브러리 ────────────────────────────────────────────────
+step("s1", "run");
+let THREE, OrbitControls, SPARK;
+try {
+  THREE = await import("three");
+  ({ OrbitControls } = await import("three/addons/controls/OrbitControls.js"));
+  SPARK = await import("@sparkjsdev/spark");
+  step("s1", "ok");
+} catch (e) {
+  step("s1", "bad");
+  blocked("CDN 에서 three.js 나 Spark 를 못 받았습니다.\n" +
+          "인터넷 연결, 사내 프록시, 광고 차단 확장을 보십시오.\n" + (e?.message ?? e));
+  throw e;
+}
+
+const canvas = $("view");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0d12);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.01, 2000);
+camera.position.set(2, 1, 2);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;          // 마우스를 놓았을 때 부드럽게 멈춘다
+controls.dampingFactor = 0.08;
+
+// ── 2. SparkRenderer ───────────────────────────────────────────
+// 이것을 장면에 안 넣으면 알갱이가 다 올라가고도 화면이 검고 오류도 안 난다.
+step("s2", "run");
+let spark = null;
+if (SPARK.SparkRenderer) {
+  spark = new SPARK.SparkRenderer({ renderer });
+  scene.add(spark);
+  step("s2", "ok");
+} else {
+  step("s2", "bad");
+  blocked("이 판의 Spark 에 SparkRenderer 가 없습니다. CDN 버전을 확인하십시오.\n" +
+          "이걸 안 넣으면 화면이 검은데 오류가 안 나서 원인을 못 찾습니다.");
+}
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize);
+resize();
+
+// ── 3~5. 파일 하나를 받아 화면에 올리는 한 묶음 ──────────────────
+let mesh = null, radius = 1;
+
+async function load(name, bytesOrNull) {
+  if (mesh) { scene.remove(mesh); mesh.dispose?.(); mesh = null; }
+  step("s3", "", "파일 받기"); step("s4", "", "알갱이로 풀기"); step("s5", "", "크기를 재서 카메라 놓기");
+  $("why").classList.remove("on");
+  for (const k of ["v-size", "v-time", "v-n", "v-per"]) $(k).textContent = "—";
+  $("v-name").textContent = name;
+
+  // 3. 받기
+  step("s3", "run");
+  let buf, secs;
+  try {
+    const t0 = performance.now();
+    if (bytesOrNull) {
+      buf = bytesOrNull;                       // 끌어다 놓은 것은 이미 손에 있다
+    } else {
+      const res = await fetch(name);
+      if (!res.ok) throw new Error(`서버가 ${res.status} 를 돌려줬습니다`);
+      buf = await res.arrayBuffer();
+    }
+    secs = (performance.now() - t0) / 1000;
+    step("s3", "ok", `파일 받기 ${secs.toFixed(2)}초`);
+    $("v-size").textContent =
+      `${(buf.byteLength / 1048576).toFixed(1)} MiB`;
+    $("v-time").textContent = `${secs.toFixed(2)} 초`;
+    $("v-size").title = `${buf.byteLength.toLocaleString("ko-KR")} 바이트`;
+  } catch (e) {
+    step("s3", "bad");
+    blocked(`"${name}" 를 못 받았습니다. ${(e?.message ?? e)}\n\n` +
+            "1. 같은 폴더에 있는지, 이름 철자와 대소문자가 맞는지\n" +
+            "2. file:// 로 열지 않았는지 — 브라우저가 막습니다.\n" +
+            "   같은 폴더에서 python3 -m http.server 를 띄우십시오\n" +
+            "3. 웹에 올렸다면 주소 뒤에 파일 이름을 붙여 직접 내려오는지");
+    return;
+  }
+
+  // 4. 알갱이로 풀기
+  step("s4", "run");
+  try {
+    const ext = name.split(".").pop().toLowerCase();
+    const fileType = FILE_TYPE[ext];
+    if (!fileType) throw new Error(`대응표에 없는 확장자입니다: .${ext}`);
+    mesh = new SPARK.SplatMesh({ fileBytes: new Uint8Array(buf), fileType });
+    scene.add(mesh);
+    await mesh.initialized;
+    const n = mesh.packedSplats?.numSplats ?? 0;
+    if (!n) throw new Error("알갱이가 0개입니다 — 파일을 못 읽었습니다");
+    step("s4", "ok", `알갱이로 풀기 (${fileType})`);
+    $("v-n").textContent = n.toLocaleString("ko-KR");
+    // 파일 크기를 알갱이 개수로 나눈 값. 68이면 각도별 색이 비어 있는 것이다.
+    $("v-per").textContent = `${(buf.byteLength / n).toFixed(2)} B`;
+  } catch (e) {
+    step("s4", "bad");
+    blocked("파일은 받았는데 알갱이로 못 풀었습니다.\n" + (e?.message ?? e) + "\n\n" +
+            ".sog 는 안쪽 이름이 pcsogszip 입니다. 확장자를 그대로 넘기면 여기서 걸립니다.\n" +
+            "점만 든 ply(x,y,z,r,g,b)에는 scale·opacity·rot 칸이 없어 역시 여기서 걸립니다.");
+    return;
+  }
+
+  fit();
+}
+
+// 5. three 의 자는 알갱이 덩어리에 빈 상자를 준다. Spark 가 주는 자를 쓴다.
+function fit() {
+  if (!mesh) return;
+  step("s5", "run");
+  const naive = new THREE.Box3().setFromObject(mesh);
+  const naiveOk = !naive.isEmpty() && isFinite(naive.min.x);
+  let box = null;
+  if (mesh.getBoundingBox) { try { box = mesh.getBoundingBox(true); } catch {} }
+  if ((!box || box.isEmpty()) && naiveOk) box = naive;
+
+  if (!box || box.isEmpty()) {
+    step("s5", "bad");
+    camera.position.set(2, 1, 2); controls.target.set(0, 0, 0);
+    blocked("크기를 못 쟀습니다. 카메라를 임의 위치에 놓았으니 크게 끌어서 찾으십시오.\n" +
+            "알갱이 개수는 맞는데 화면이 비어 보이면 대개 이쪽입니다.");
+    return;
+  }
+  const c = box.getCenter(new THREE.Vector3());
+  radius = box.getSize(new THREE.Vector3()).length() * 0.5;
+  controls.target.copy(c);
+  camera.position.copy(c).add(new THREE.Vector3(radius * 0.9, radius * 0.3, radius * 1.1));
+  camera.near = Math.max(radius / 1000, 0.001);
+  camera.far = radius * 60;
+  camera.updateProjectionMatrix();
+
+  // 카메라를 코드로 옮긴 뒤에는 감쇠의 잔여분을 반드시 털어야 한다.
+  // 안 털면 그것이 다 풀릴 때까지 카메라가 스스로 위로 밀려 올라가,
+  // 놓아 둔 각도가 아니라 정수리에서 내려다보는 자리로 끝난다.
+  const damp = controls.enableDamping;
+  controls.enableDamping = false;
+  controls.update();
+  controls.enableDamping = damp;
+
+  step("s5", "ok",
+    `크기 재기 · 반지름 ${radius.toFixed(2)} · Box3 는 ` +
+    (naiveOk ? "됐습니다" : "빈 상자를 줬습니다"));
+}
+
+$("b-fit").onclick = fit;
+$("b-flip").onclick = () => {
+  if (!mesh) return;
+  mesh.scale.y *= -1; mesh.scale.z *= -1;
+  mesh.updateMatrixWorld(true);
+  fit();
+};
+$("b-why").onclick = () => $("why").classList.toggle("on");
+let spinning = false;
+$("b-spin").onclick = e => {
+  spinning = !spinning;
+  controls.autoRotate = spinning;
+  controls.autoRotateSpeed = 0.7;
+  e.target.style.background = spinning ? "#0b5a86" : "";
+};
+
+// ── 끌어다 놓기 ────────────────────────────────────────────────
+const drop = $("drop");
+addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("on"); });
+addEventListener("dragleave", e => { if (e.relatedTarget === null) drop.classList.remove("on"); });
+addEventListener("drop", async e => {
+  e.preventDefault();
+  drop.classList.remove("on");
+  const f = e.dataTransfer?.files?.[0];
+  if (f) await load(f.name, await f.arrayBuffer());
+});
+
+// ── 그리기 고리 ────────────────────────────────────────────────
+let frames = 0, last = performance.now();
+(function loop() {
+  requestAnimationFrame(loop);
+  controls.update();
+  renderer.render(scene, camera);
+  frames++;
+  const now = performance.now();
+  if (now - last >= 500) {
+    $("v-fps").textContent = (frames * 1000 / (now - last)).toFixed(0);
+    frames = 0; last = now;
+  }
+})();
+
+window.room3d = { THREE, SPARK, scene, camera, controls, renderer, spark, fit,
+                  get mesh() { return mesh; } };
+
+await load(SPLAT_FILE, null);
+</script>
+</body>
+</html>
