@@ -68,6 +68,8 @@
     <tr><th>알갱이</th><td id="v-n">—</td></tr>
     <tr><th>알갱이당</th><td class="hl" id="v-per">—</td></tr>
     <tr><th>초당 프레임</th><td id="v-fps">—</td></tr>
+    <tr><th>라이브러리</th><td id="v-libs">—</td></tr>
+    <tr><th>첫 화면까지</th><td class="hl" id="v-first">—</td></tr>
   </table>
 </div>
 
@@ -127,7 +129,10 @@ try {
   THREE = await import("three");
   ({ OrbitControls } = await import("three/addons/controls/OrbitControls.js"));
   SPARK = await import("@sparkjsdev/spark");
-  step("s1", "ok");
+  // performance.now() 는 이 페이지를 열기 시작한 순간부터의 밀리초다.
+  // 그래서 스톱워치 없이도 폰에서 몇 초에 떴는지가 화면에 찍힌다.
+  step("s1", "ok", `three.js 와 Spark 불러오기 ${(performance.now()/1000).toFixed(2)}초`);
+  $("v-libs").textContent = `${(performance.now()/1000).toFixed(2)} 초`;
 } catch (e) {
   step("s1", "bad");
   blocked("CDN 에서 three.js 나 Spark 를 못 받았습니다.\n" +
@@ -329,11 +334,20 @@ addEventListener("drop", async e => {
 
 // ── 그리기 고리 ────────────────────────────────────────────────
 let frames = 0, last = performance.now();
+let framesWithMesh = 0, firstShownAt = null;
 (function loop() {
   requestAnimationFrame(loop);
   controls.update();
   renderer.render(scene, camera);
   frames++;
+
+  // 알갱이가 올라간 뒤 두 번째 프레임을 "화면이 떴다"로 본다.
+  // Spark 가 첫 프레임에서는 정렬을 마치지 못하는 경우가 있다.
+  if (mesh && firstShownAt === null && ++framesWithMesh >= 2) {
+    firstShownAt = performance.now();
+    $("v-first").textContent = `${(firstShownAt / 1000).toFixed(2)} 초`;
+  }
+
   const now = performance.now();
   if (now - last >= 500) {
     $("v-fps").textContent = (frames * 1000 / (now - last)).toFixed(0);
