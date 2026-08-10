@@ -70,6 +70,7 @@
     <tr><th>초당 프레임</th><td id="v-fps">—</td></tr>
     <tr><th>라이브러리</th><td id="v-libs">—</td></tr>
     <tr><th>첫 화면까지</th><td class="hl" id="v-first">—</td></tr>
+    <tr><th>그리는 화소</th><td id="v-res">—</td></tr>
   </table>
 </div>
 
@@ -82,7 +83,8 @@
     <button class="q" data-f="scene_500000.sog">50만</button>
   </div>
   <div class="row">화소 배율 <button id="b-dpr">1배</button>
-    &nbsp;퍼짐 <input type="range" id="std" min="0.8" max="3.2" step="0.1"></div>
+    <button id="b-auto" class="on">자동 화질</button></div>
+  <div class="row">퍼짐 <input type="range" id="std" min="0.8" max="3.2" step="0.1"></div>
 </div>
 
 <script type="importmap">
@@ -152,9 +154,18 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
 // 화소 배율을 2배로 두면 그릴 화소가 네 배가 되고, 내장 그래픽에서는 그만큼 느려진다.
 // 알갱이 수백만 개를 매 프레임 정렬해 겹쳐 바르는 일이라 여기가 크게 듣는다.
 // 기본을 1배로 두고 필요하면 올린다.
-let hiDpi = false;
-const applyDpr = () => renderer.setPixelRatio(hiDpi ? Math.min(devicePixelRatio, 2) : 1);
-applyDpr();
+// 알갱이 개수보다 그릴 화소가 먼저 병목이 된다. 노트북 창 1900x880 은 167만 화소인데
+// 폰은 배율 1배에서 33만 화소로 다섯 배 적다. 그래서 같은 파일이 폰에서 31, 외장 GPU
+// 없는 노트북에서 7 로 나온다. resScale 로 그리는 화소를 줄이고 CSS 가 늘려 채운다.
+let hiDpi = false, resScale = 1, autoQuality = true;
+function applyRes() {
+  const base = hiDpi ? Math.min(devicePixelRatio, 2) : 1;
+  renderer.setPixelRatio(base * resScale);
+  renderer.setSize(innerWidth, innerHeight, false);
+  const c = renderer.domElement;
+  $("v-res").textContent =
+    `${c.width}×${c.height} (${resScale.toFixed(2)}배)`;
+}
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0d12);
 const camera = new THREE.PerspectiveCamera(55, 1, 0.01, 2000);
@@ -179,7 +190,7 @@ if (SPARK.SparkRenderer) {
 }
 
 function resize() {
-  renderer.setSize(innerWidth, innerHeight, false);
+  applyRes();
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
 }
@@ -322,10 +333,15 @@ for (const b of document.querySelectorAll("button.q")) {
 
 $("b-dpr").onclick = e => {
   hiDpi = !hiDpi;
-  applyDpr();
   resize();
   e.target.textContent = hiDpi ? `${Math.min(devicePixelRatio, 2)}배` : "1배";
   e.target.classList.toggle("on", hiDpi);
+};
+
+$("b-auto").onclick = e => {
+  autoQuality = !autoQuality;
+  e.target.classList.toggle("on", autoQuality);
+  if (!autoQuality) { resScale = 1; resize(); }
 };
 
 // 알갱이가 덮는 넓이를 줄이면 겹쳐 바르는 양이 줄어 빨라진다. 대신 구멍이 보일 수 있다.
@@ -362,8 +378,19 @@ let framesWithMesh = 0, firstShownAt = null;
 
   const now = performance.now();
   if (now - last >= 500) {
-    $("v-fps").textContent = (frames * 1000 / (now - last)).toFixed(0);
+    const fps = frames * 1000 / (now - last);
+    $("v-fps").textContent = fps.toFixed(0);
     frames = 0; last = now;
+
+    // 프레임이 안 나오면 그리는 화소를 줄이고, 남으면 되돌린다.
+    // 24 와 50 사이를 비워 두어 두 값 사이에서 왔다 갔다 하지 않게 한다.
+    if (autoQuality && mesh) {
+      if (fps < 24 && resScale > 0.5) {
+        resScale = Math.max(0.5, resScale * 0.85); resize();
+      } else if (fps > 50 && resScale < 1) {
+        resScale = Math.min(1, resScale * 1.1); resize();
+      }
+    }
   }
 })();
 
